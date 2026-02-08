@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Modality, Type, GenerateContentResponse } from "@google/genai";
-import { Patient, TranscriptEntry, MedicalSuggestions, VisualAnalysis } from '../types';
+import { Patient, TranscriptEntry, MedicalSuggestions, VisualAnalysis, EncounterPacket } from '../types';
 
 // Use the recommended initialization pattern
 export const getGeminiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -57,7 +57,7 @@ export const analyzeVisualSymptom = async (base64Image: string, patientContext: 
 export const getMedicalSuggestions = async (patient: Patient, transcript: TranscriptEntry[]): Promise<MedicalSuggestions> => {
   const ai = getGeminiClient();
   const transcriptString = transcript.map(t => `${t.speaker}: ${t.text}`).join('\n');
-  
+
   // Update prompt keys to match the MedicalInsight interface properties
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
@@ -117,3 +117,122 @@ export const getMedicalSuggestions = async (patient: Patient, transcript: Transc
     };
   }
 };
+
+// Generate a complete, signable encounter packet
+export const generateEncounterPacket = async (
+  patient: Patient,
+  transcript: TranscriptEntry[],
+  visualAnalysis?: VisualAnalysis
+): Promise<EncounterPacket> => {
+  const ai = getGeminiClient();
+  const transcriptString = transcript.map(t =>
+    `[${Math.floor(t.timestamp / 1000)}s] ${t.speaker}: ${t.text}`
+  ).join('\n');
+
+  const visualContext = visualAnalysis
+    ? `\n\nVisual Findings: ${visualAnalysis.observation}\nConcerns: ${visualAnalysis.concerns.join(', ')}\nSuggested Action: ${visualAnalysis.suggestedAction}`
+    : '';
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: `
+      TASK: Generate a complete, signable clinical encounter packet.
+      
+      PATIENT: ${patient.name}, ${patient.age}y ${patient.gender}
+      HISTORY: ${patient.medicalHistory.length > 0 ? patient.medicalHistory.join(', ') : 'None documented'}
+      MEDICATIONS: ${patient.currentMedications.length > 0 ? patient.currentMedications.join(', ') : 'None'}
+      ALLERGIES: ${patient.allergies.length > 0 ? patient.allergies.join(', ') : 'NKA'}
+      
+      ENCOUNTER TRANSCRIPT:
+      ${transcriptString}
+      ${visualContext}
+      
+      REQUIREMENTS:
+      1. Every clinical assertion MUST have provenance with:
+         - "quote": Anchor phrase from transcript (exact or near-exact)
+         - "reasoning": Clinical rationale for inference
+         - "confidence": Low/Medium/High
+         - "alternativeInterpretations": What could change this conclusion
+      
+      2. RED FLAGS: Identify any urgent findings (chest pain, neuro deficits, suicidal ideation, etc.)
+      
+      3. Generate patient instructions in the patient's detected language if non-English.
+      
+      OUTPUT JSON:
+      {
+        "soapNote": {
+          "subjective": {
+            "chiefComplaint": "string",
+            "historyOfPresentIllness": "string",
+            "reviewOfSystems": ["string"],
+            "provenance": [{"quote": "string", "reasoning": "string", "confidence": "Low|Medium|High", "alternativeInterpretations": ["string"]}]
+          },
+          "objective": {
+            "vitalSigns": "string or null",
+            "physicalExam": "string or null",
+            "visualFindings": "string or null",
+            "provenance": [...]
+          },
+          "assessment": {
+            "diagnoses": ["string"],
+            "differentials": ["string"],
+            "provenance": [...]
+          },
+          "plan": {
+            "treatments": ["string"],
+            "tests": ["string"],
+            "referrals": ["string"],
+            "provenance": [...]
+          }
+        },
+        "problemList": [{"description": "string", "status": "Active|Resolved|Chronic", "dateIdentified": "today", "code": "ICD-10 if known", "provenance": {...}}],
+        "orders": [{"type": "Lab|Imaging|Medication|Referral|Procedure", "description": "string", "priority": "Routine|Urgent|STAT", "rationale": "string", "provenance": {...}}],
+        "patientInstructions": [{"instruction": "string", "language": "en|es|hi|zh|he|other", "category": "Medication|Lifestyle|FollowUp|Warning|General"}],
+        "followUps": [{"type": "string", "timeframe": "string", "reason": "string", "provenance": {...}}],
+        "redFlags": ["string"],
+        "requiresConfirmation": true
+      }
+    `,
+    config: {
+      responseMimeType: "application/json",
+    }
+  });
+
+  try {
+    const data = JSON.parse(response.text || '{}');
+    return {
+      generatedAt: new Date().toISOString(),
+      patientId: patient.id,
+      patientName: patient.name,
+      soapNote: data.soapNote || { subjective: { chiefComplaint: '', historyOfPresentIllness: '' }, objective: {}, assessment: { diagnoses: [] }, plan: { treatments: [], tests: [] } },
+      problemList: data.problemList || [],
+      orders: data.orders || [],
+      patientInstructions: data.patientInstructions || [],
+      followUps: data.followUps || [],
+      redFlags: data.redFlags || [],
+      requiresConfirmation: data.requiresConfirmation ?? true,
+      signatureStatus: 'Draft'
+    } as EncounterPacket;
+  } catch (e) {
+    console.error("Encounter packet parse error", e);
+    return {
+      generatedAt: new Date().toISOString(),
+      patientId: patient.id,
+      patientName: patient.name,
+      soapNote: {
+        subjective: { chiefComplaint: 'Unable to generate', historyOfPresentIllness: 'Parsing error occurred' },
+        objective: {},
+        assessment: { diagnoses: ['Error in generation'] },
+        plan: { treatments: [], tests: [] }
+      },
+      problemList: [],
+      orders: [],
+      patientInstructions: [],
+      followUps: [],
+      redFlags: ['Generation error - manual review required'],
+      requiresConfirmation: true,
+      signatureStatus: 'Draft'
+    };
+  }
+};
+
