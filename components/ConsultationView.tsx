@@ -58,6 +58,28 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
               }
             }
           },
+          suggestedLabsAndTests: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                details: { type: Type.STRING },
+                confidence: { type: Type.STRING, enum: ['Low', 'Medium', 'High'] }
+              }
+            }
+          },
+          potentialTreatments: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                details: { type: Type.STRING },
+                confidence: { type: Type.STRING, enum: ['Low', 'Medium', 'High'] }
+              }
+            }
+          },
           workingObservations: {
             type: Type.ARRAY,
             items: {
@@ -107,13 +129,49 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
     for (const fc of functionCalls) {
       if (fc.name === 'updateClinicalIntelligence') {
         const newInsights = fc.args as Partial<MedicalSuggestions>;
+
+        // Update the dashboard suggestions
         setSuggestions(prev => ({
           possibleDiagnoses: [...(newInsights.possibleDiagnoses || []), ...(prev?.possibleDiagnoses || [])].slice(0, 10),
           recommendedQuestions: [...(newInsights.recommendedQuestions || []), ...(prev?.recommendedQuestions || [])].slice(0, 5),
           workingObservations: [...(newInsights.workingObservations || []), ...(prev?.workingObservations || [])].slice(0, 10),
-          suggestedLabsAndTests: prev?.suggestedLabsAndTests || [],
-          potentialTreatments: prev?.potentialTreatments || []
+          suggestedLabsAndTests: [...(newInsights.suggestedLabsAndTests || []), ...(prev?.suggestedLabsAndTests || [])].slice(0, 5),
+          potentialTreatments: [...(newInsights.potentialTreatments || []), ...(prev?.potentialTreatments || [])].slice(0, 5)
         }));
+
+        // Automatically populate order sets if confidence is high
+        const newOrders: OrderItem[] = [];
+        if (newInsights.suggestedLabsAndTests) {
+          newInsights.suggestedLabsAndTests.forEach(lab => {
+            newOrders.push({
+              id: `lab-${Date.now()}-${Math.random()}`,
+              type: lab.title.toLowerCase().includes('x-ray') || lab.title.toLowerCase().includes('mri') || lab.title.toLowerCase().includes('ct') ? 'Imaging' : 'Lab',
+              name: lab.title,
+              details: lab.details,
+              priority: lab.confidence === 'High' ? 'Urgent' : 'Routine',
+              rationale: 'AI Suggested based on clinical findings',
+              status: 'suggested'
+            });
+          });
+        }
+        if (newInsights.potentialTreatments) {
+          newInsights.potentialTreatments.forEach(tx => {
+            newOrders.push({
+              id: `tx-${Date.now()}-${Math.random()}`,
+              type: 'Medication',
+              name: tx.title,
+              details: tx.details,
+              priority: tx.confidence === 'High' ? 'Urgent' : 'Routine',
+              rationale: 'AI Suggested based on clinical findings',
+              status: 'suggested'
+            });
+          });
+        }
+
+        if (newOrders.length > 0) {
+          setOrders(prev => [...newOrders, ...prev].slice(0, 10));
+        }
+
         setLastUpdate(Date.now());
       }
     }
@@ -135,6 +193,7 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
       1. SILENT MODE: Never speak or generate audio responses. Only listen and analyze.
       2. PROACTIVE TOOL USE: You MUST call 'updateClinicalIntelligence' FREQUENTLY as you hear clinical information.
       3. DO NOT WAIT: Even partial observations should be reported via the tool. Call it early and often.
+      4. LANGUAGE: Always respond and analyze in English. If you hear other languages (e.g. Hindi, Spanish), translate them to clinical English for the dashboard.
       
       WHAT TO DETECT AND REPORT:
       - Any symptoms mentioned → add to workingObservations
@@ -142,6 +201,8 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
       - Possible diagnoses (even if uncertain) → add to possibleDiagnoses with appropriate confidence
       - Questions the clinician should ask → add to recommendedQuestions
       - Red flags or urgent findings → add with HIGH confidence
+      - Required labs, imaging, or diagnostic tests → add to suggestedLabsAndTests
+      - Potential medications or treatments to consider → add to potentialTreatments
       
       PATIENT CONTEXT:
       - Name: ${patient.name}

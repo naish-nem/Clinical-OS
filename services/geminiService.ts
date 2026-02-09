@@ -66,7 +66,7 @@ export const getMedicalSuggestions = async (patient: Patient, transcript: Transc
       Institutional Clinical Copilot Analysis for Patient ${patient.name}.
       
       Demographics: ${patient.age}y, ${patient.gender}.
-      Cultural/Linguistic Context: Support multilingual input (Spanish, Hindi, Hebrew, etc.) and translate insights to standard clinical English. 
+      Cultural/Linguistic Context: Always analyze and respond in English. If the input is in another language, translate it to standard clinical English.
       EHR Context: 
       - History: ${patient.medicalHistory.length > 0 ? patient.medicalHistory.join(', ') : 'UNSPECIFIED'}
       - Meds: ${patient.currentMedications.length > 0 ? patient.currentMedications.join(', ') : 'UNSPECIFIED'}
@@ -167,7 +167,7 @@ export const generateEncounterPacket = async (
       
       2. RED FLAGS: Identify any urgent findings (chest pain, neuro deficits, suicidal ideation, etc.)
       
-      3. Generate patient instructions in the patient's detected language if non-English.
+      3. Language: Always generate in English.
       
       OUTPUT JSON:
       {
@@ -198,7 +198,7 @@ export const generateEncounterPacket = async (
         },
         "problemList": [{"description": "string", "status": "Active|Resolved|Chronic", "dateIdentified": "today", "code": "ICD-10 if known", "provenance": {...}}],
         "orders": [{"type": "Lab|Imaging|Medication|Referral|Procedure", "description": "string", "priority": "Routine|Urgent|STAT", "rationale": "string", "provenance": {...}}],
-        "patientInstructions": [{"instruction": "string", "language": "en|es|hi|zh|he|other", "category": "Medication|Lifestyle|FollowUp|Warning|General"}],
+        "patientInstructions": [{"instruction": "string", "language": "en", "category": "Medication|Lifestyle|FollowUp|Warning|General"}],
         "followUps": [{"type": "string", "timeframe": "string", "reason": "string", "provenance": {...}}],
         "redFlags": ["string"],
         "requiresConfirmation": true
