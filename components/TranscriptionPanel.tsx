@@ -43,8 +43,8 @@ const TranscriptionPanel: React.FC<TranscriptionPanelProps> = ({ transcript, pii
             <button
               onClick={() => setShowOriginal(!showOriginal)}
               className={`px-2 py-1 text-[9px] font-bold uppercase rounded transition-all ${showOriginal
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white text-slate-600 border border-slate-200'
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white text-slate-600 border border-slate-200'
                 }`}
             >
               {showOriginal ? 'Original + English' : 'English Only'}
@@ -58,17 +58,19 @@ const TranscriptionPanel: React.FC<TranscriptionPanelProps> = ({ transcript, pii
           <div className="space-y-6">
             {transcript.map((entry, index) => {
               const isClinician = entry.speaker === Speaker.Clinician;
+              const isSystem = entry.speaker === 'System';
               const isNonEnglish = entry.originalText && entry.detectedLanguage && entry.detectedLanguage !== 'en';
 
               return (
-                <div key={`${entry.timestamp}-${index}`} className="group relative border-l border-slate-100 pl-6 pb-2">
-                  <div className={`absolute -left-[4.5px] top-1.5 w-2 h-2 rounded-full border border-white transition-colors ${isNonEnglish ? 'bg-purple-400' : 'bg-slate-200 group-hover:bg-indigo-400'
+                <div key={`${entry.timestamp}-${index}`} className={`group relative border-l pl-6 pb-2 ${isSystem ? 'border-emerald-200 bg-emerald-50/50 -mx-2 px-8 py-2 rounded-r-lg' : 'border-slate-100'
+                  }`}>
+                  <div className={`absolute -left-[4.5px] top-1.5 w-2 h-2 rounded-full border border-white transition-colors ${isSystem ? 'bg-emerald-400' : isNonEnglish ? 'bg-purple-400' : 'bg-slate-200 group-hover:bg-indigo-400'
                     }`}></div>
 
                   <div className="flex items-baseline gap-3 mb-1">
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${isClinician ? 'text-indigo-600' : 'text-slate-900'
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${isSystem ? 'text-emerald-600' : isClinician ? 'text-indigo-600' : 'text-slate-900'
                       }`}>
-                      {isClinician ? 'Clinician' : 'Patient'}
+                      {isSystem ? '🤖 AI Note' : isClinician ? 'Clinician' : 'Patient'}
                     </span>
                     <span className="mono-data text-[9px] text-slate-300 font-bold">
                       {new Date(entry.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -91,7 +93,8 @@ const TranscriptionPanel: React.FC<TranscriptionPanelProps> = ({ transcript, pii
                   )}
 
                   {/* Clinical English */}
-                  <p className={`text-[13px] leading-relaxed font-medium ${isClinician ? 'text-slate-600' : 'text-slate-900'}`}>
+                  <p className={`text-[13px] leading-relaxed font-medium ${isSystem ? 'text-emerald-700 italic' : isClinician ? 'text-slate-600' : 'text-slate-900'
+                    }`}>
                     {entry.text}
                   </p>
                   {isNonEnglish && showOriginal && (

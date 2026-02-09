@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Modality, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, Modality, Type, GenerateContentResponse, DynamicRetrievalConfigMode } from "@google/genai";
 import { Patient, TranscriptEntry, MedicalSuggestions, VisualAnalysis, EncounterPacket } from '../types';
 
 // Use the recommended initialization pattern
@@ -54,13 +54,14 @@ export const analyzeVisualSymptom = async (base64Image: string, patientContext: 
 };
 
 // Generate structured medical suggestions based on transcript and patient history
+// Now includes Google Search Retrieval for medical grounding
 export const getMedicalSuggestions = async (patient: Patient, transcript: TranscriptEntry[]): Promise<MedicalSuggestions> => {
   const ai = getGeminiClient();
   const transcriptString = transcript.map(t => `${t.speaker}: ${t.text}`).join('\n');
 
   // Update prompt keys to match the MedicalInsight interface properties
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.5-flash',
     contents: `
       Institutional Clinical Copilot Analysis for Patient ${patient.name}.
       
@@ -75,19 +76,29 @@ export const getMedicalSuggestions = async (patient: Patient, transcript: Transc
       ${transcriptString}
 
       Task: Generate a real-time differential and order set. 
+      Use current medical literature and clinical guidelines to ground your suggestions.
       If patient history is minimal, focus suggestions on baseline diagnostic intake.
 
       Output JSON:
       {
-        "possibleDiagnoses": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High"}],
+        "possibleDiagnoses": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High", "source": "guideline or literature reference if available"}],
         "recommendedQuestions": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High"}],
         "suggestedLabsAndTests": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High"}],
-        "potentialTreatments": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High"}],
+        "potentialTreatments": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High", "source": "guideline reference if available"}],
         "workingObservations": [{"id": "string", "title": "string", "details": "string", "confidence": "Low|Medium|High"}]
       }
     `,
     config: {
       responseMimeType: "application/json",
+      // Enable Google Search grounding for medical accuracy
+      tools: [{
+        googleSearchRetrieval: {
+          dynamicRetrievalConfig: {
+            mode: DynamicRetrievalConfigMode.MODE_DYNAMIC,
+            dynamicThreshold: 0.3 // Lower threshold = more grounding
+          }
+        }
+      }]
     }
   });
 
@@ -134,7 +145,7 @@ export const generateEncounterPacket = async (
     : '';
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.5-flash',
     contents: `
       TASK: Generate a complete, signable clinical encounter packet.
       
@@ -195,6 +206,15 @@ export const generateEncounterPacket = async (
     `,
     config: {
       responseMimeType: "application/json",
+      // Enable Google Search grounding for evidence-based clinical documentation
+      tools: [{
+        googleSearchRetrieval: {
+          dynamicRetrievalConfig: {
+            mode: DynamicRetrievalConfigMode.MODE_DYNAMIC,
+            dynamicThreshold: 0.3
+          }
+        }
+      }]
     }
   });
 
@@ -236,3 +256,57 @@ export const generateEncounterPacket = async (
   }
 };
 
+// ============================================
+// GROUNDING ENRICHMENT FUNCTION
+// Combines Gemini output with free medical API data
+// ============================================
+
+import {
+  gatherGroundingEvidence,
+  formatGroundingAsInsights,
+  GroundingResult
+} from './groundingService';
+
+export interface EnrichedEncounterPacket extends EncounterPacket {
+  groundingEvidence?: GroundingResult;
+  groundingInsights?: ReturnType<typeof formatGroundingAsInsights>;
+}
+
+export const generateEnrichedEncounterPacket = async (
+  patient: Patient,
+  transcript: TranscriptEntry[],
+  visualAnalysis?: VisualAnalysis
+): Promise<EnrichedEncounterPacket> => {
+  // Generate the base encounter packet with Google Search grounding
+  const basePacket = await generateEncounterPacket(patient, transcript, visualAnalysis);
+
+  // Extract diagnoses and medications for targeted grounding
+  const diagnoses = basePacket.soapNote.assessment.diagnoses || [];
+  const medications = patient.currentMedications || [];
+
+  // Also extract any medications mentioned in the plan
+  const planMeds = basePacket.orders
+    .filter(o => o.type === 'Medication')
+    .map(o => o.description.split(' ')[0]); // Get first word (drug name)
+
+  const allMedications = [...new Set([...medications, ...planMeds])];
+
+  console.log('[Grounding] Gathering evidence for:', { diagnoses, medications: allMedications });
+
+  // Gather evidence from free APIs (PubMed, OpenFDA, RxNorm, ICD-10)
+  const groundingEvidence = await gatherGroundingEvidence(diagnoses, allMedications);
+  const groundingInsights = formatGroundingAsInsights(groundingEvidence);
+
+  console.log('[Grounding] Evidence gathered:', {
+    pubmedArticles: groundingEvidence.pubmedArticles.length,
+    drugInfo: groundingEvidence.drugInfo.size,
+    interactions: groundingEvidence.drugInteractions.length,
+    icdCodes: groundingEvidence.icdCodes.size
+  });
+
+  return {
+    ...basePacket,
+    groundingEvidence,
+    groundingInsights
+  };
+};
