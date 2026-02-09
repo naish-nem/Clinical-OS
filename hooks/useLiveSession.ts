@@ -1,6 +1,6 @@
 
 import { useState, useCallback, useRef } from 'react';
-import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 
 // Implement manual base64 encoding as required by Gemini Live API guidelines.
 function encode(bytes: Uint8Array) {
@@ -20,7 +20,7 @@ interface LiveSessionProps {
 export const useLiveSession = ({ onTranscription, onToolCall }: LiveSessionProps) => {
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const sessionRef = useRef<any>(null);
 
   const stopSession = useCallback(() => {
@@ -34,16 +34,33 @@ export const useLiveSession = ({ onTranscription, onToolCall }: LiveSessionProps
   const startSession = useCallback(async (systemInstruction: string, tools?: any[]) => {
     try {
       // Create new instance right before session start to ensure latest environment context.
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = process.env.API_KEY;
+      console.log('[LiveSession] Starting session...');
+      console.log('[LiveSession] API Key present:', !!apiKey);
+      console.log('[LiveSession] API Key prefix:', apiKey?.substring(0, 10));
+
+      if (!apiKey) {
+        setError("API key is not configured. Please check your .env.local file.");
+        return;
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
 
+      console.log('[LiveSession] Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+      console.log('[LiveSession] Microphone access granted');
+
+      console.log('[LiveSession] Connecting to Gemini Live API...');
+      console.log('[LiveSession] Model: gemini-2.5-flash-native-audio-preview-12-2025');
+
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
+            console.log('[LiveSession] ✅ WebSocket connection OPENED successfully!');
             setIsActive(true);
+            setError(null);
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
@@ -66,7 +83,7 @@ export const useLiveSession = ({ onTranscription, onToolCall }: LiveSessionProps
           },
           onmessage: async (message: LiveServerMessage) => {
             // SILENT MODE: Handle model output text but bypass audio decoding for clinical log focus.
-            
+
             // Handle Transcriptions
             if (message.serverContent?.inputTranscription) {
               onTranscription(message.serverContent.inputTranscription.text, true, !!message.serverContent.turnComplete);
@@ -88,9 +105,11 @@ export const useLiveSession = ({ onTranscription, onToolCall }: LiveSessionProps
               });
             }
           },
-          onerror: (e) => {
-            console.error("Live session error", e);
-            setError("Connection failed. Please check your network.");
+          onerror: (e: any) => {
+            console.error('[LiveSession] ❌ WebSocket ERROR:', e);
+            console.error('[LiveSession] Error details:', JSON.stringify(e, null, 2));
+            const errorMessage = e?.message || e?.toString() || 'Unknown connection error';
+            setError(`Live session failed: ${errorMessage}. Check console for details.`);
             stopSession();
           },
           onclose: () => {
@@ -98,7 +117,8 @@ export const useLiveSession = ({ onTranscription, onToolCall }: LiveSessionProps
           }
         },
         config: {
-          responseModalities: [Modality.AUDIO], // Required for audio-to-text features.
+          // Native-audio Live models expect AUDIO modality for stable session startup.
+          responseModalities: [Modality.AUDIO],
           systemInstruction,
           inputAudioTranscription: {},
           outputAudioTranscription: {},

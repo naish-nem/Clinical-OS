@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
 import { EncounterPacket, Provenance, Order, ProblemListItem, PatientInstruction, FollowUp } from '../types';
+import { GroundingResult } from '../services/groundingService';
+
+interface EnrichedEncounterPacket extends EncounterPacket {
+    groundingEvidence?: GroundingResult;
+}
 
 interface EncounterPacketPanelProps {
-    packet: EncounterPacket;
+    packet: EnrichedEncounterPacket;
     onSign?: () => void;
     onExportFHIR?: () => void;
 }
@@ -19,8 +24,8 @@ const ProvenanceTooltip: React.FC<{ provenance?: Provenance }> = ({ provenance }
                 <div className="text-slate-400 mb-1"><span className="font-bold">Reasoning:</span> {provenance.reasoning}</div>
                 <div className="flex items-center gap-2">
                     <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${provenance.confidence === 'High' ? 'bg-emerald-500/20 text-emerald-400' :
-                            provenance.confidence === 'Medium' ? 'bg-amber-500/20 text-amber-400' :
-                                'bg-rose-500/20 text-rose-400'
+                        provenance.confidence === 'Medium' ? 'bg-amber-500/20 text-amber-400' :
+                            'bg-rose-500/20 text-rose-400'
                         }`}>{provenance.confidence}</span>
                 </div>
                 {provenance.alternativeInterpretations && provenance.alternativeInterpretations.length > 0 && (
@@ -41,13 +46,21 @@ const SectionHeader: React.FC<{ title: string; icon?: string }> = ({ title, icon
 );
 
 const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onSign, onExportFHIR }) => {
-    const [activeTab, setActiveTab] = useState<'soap' | 'orders' | 'instructions' | 'safety'>('soap');
+    const [activeTab, setActiveTab] = useState<'soap' | 'orders' | 'instructions' | 'safety' | 'grounding'>('soap');
+
+    const hasGrounding = packet.groundingEvidence && (
+        packet.groundingEvidence.pubmedArticles.length > 0 ||
+        packet.groundingEvidence.drugInteractions.length > 0 ||
+        packet.groundingEvidence.icdCodes.size > 0 ||
+        packet.groundingEvidence.drugInfo.size > 0
+    );
 
     const tabs = [
         { id: 'soap' as const, label: 'SOAP Note', icon: '📋' },
         { id: 'orders' as const, label: 'Orders', icon: '💊' },
         { id: 'instructions' as const, label: 'Instructions', icon: '📄' },
         { id: 'safety' as const, label: 'Safety', icon: '🚨' },
+        ...(hasGrounding ? [{ id: 'grounding' as const, label: 'Evidence', icon: '🔬' }] : []),
     ];
 
     return (
@@ -62,8 +75,8 @@ const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onS
                 </div>
                 <div className="flex items-center gap-2">
                     <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${packet.signatureStatus === 'Signed' ? 'bg-emerald-500/20 text-emerald-400' :
-                            packet.signatureStatus === 'PendingReview' ? 'bg-amber-500/20 text-amber-400' :
-                                'bg-slate-700 text-slate-400'
+                        packet.signatureStatus === 'PendingReview' ? 'bg-amber-500/20 text-amber-400' :
+                            'bg-slate-700 text-slate-400'
                         }`}>
                         {packet.signatureStatus}
                     </span>
@@ -92,8 +105,8 @@ const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onS
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id)}
                         className={`flex-1 px-3 py-2 text-[10px] font-bold uppercase tracking-wider transition-all ${activeTab === tab.id
-                                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white'
-                                : 'text-slate-500 hover:text-slate-700'
+                            ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white'
+                            : 'text-slate-500 hover:text-slate-700'
                             }`}
                     >
                         <span className="mr-1">{tab.icon}</span>
@@ -197,7 +210,7 @@ const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onS
                                         <div key={i} className="flex items-center justify-between text-[11px] bg-slate-50 px-2 py-1 rounded">
                                             <span className="text-slate-800">{problem.description}</span>
                                             <span className={`text-[9px] font-bold uppercase ${problem.status === 'Active' ? 'text-rose-500' :
-                                                    problem.status === 'Chronic' ? 'text-amber-500' : 'text-emerald-500'
+                                                problem.status === 'Chronic' ? 'text-amber-500' : 'text-emerald-500'
                                                 }`}>{problem.status}</span>
                                         </div>
                                     ))}
@@ -218,13 +231,13 @@ const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onS
                                     <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                                         <div className="flex items-center justify-between mb-1">
                                             <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${order.type === 'Medication' ? 'bg-purple-100 text-purple-600' :
-                                                    order.type === 'Lab' ? 'bg-blue-100 text-blue-600' :
-                                                        order.type === 'Imaging' ? 'bg-cyan-100 text-cyan-600' :
-                                                            order.type === 'Referral' ? 'bg-amber-100 text-amber-600' :
-                                                                'bg-slate-200 text-slate-600'
+                                                order.type === 'Lab' ? 'bg-blue-100 text-blue-600' :
+                                                    order.type === 'Imaging' ? 'bg-cyan-100 text-cyan-600' :
+                                                        order.type === 'Referral' ? 'bg-amber-100 text-amber-600' :
+                                                            'bg-slate-200 text-slate-600'
                                                 }`}>{order.type}</span>
                                             <span className={`text-[9px] font-bold uppercase ${order.priority === 'STAT' ? 'text-rose-600' :
-                                                    order.priority === 'Urgent' ? 'text-amber-600' : 'text-slate-500'
+                                                order.priority === 'Urgent' ? 'text-amber-600' : 'text-slate-500'
                                                 }`}>{order.priority}</span>
                                         </div>
                                         <p className="text-[12px] text-slate-800 font-medium">{order.description}</p>
@@ -316,6 +329,152 @@ const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onS
                         </div>
                     </div>
                 )}
+
+                {activeTab === 'grounding' && packet.groundingEvidence && (
+                    <div className="space-y-4">
+                        <SectionHeader title="Evidence Grounding" icon="🔬" />
+
+                        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-4">
+                            <p className="text-[10px] text-indigo-700">
+                                <span className="font-bold">Sources:</span> PubMed, OpenFDA, RxNorm (NIH), NLM Clinical Tables
+                            </p>
+                        </div>
+
+                        {/* PubMed Literature */}
+                        {packet.groundingEvidence.pubmedArticles.length > 0 && (
+                            <div>
+                                <h5 className="text-[10px] font-bold text-emerald-600 uppercase mb-2 flex items-center gap-1">
+                                    📚 Literature Evidence
+                                </h5>
+                                <div className="space-y-2">
+                                    {packet.groundingEvidence.pubmedArticles.slice(0, 5).map((article, i) => (
+                                        <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                            <a
+                                                href={`https://pubmed.ncbi.nlm.nih.gov/${article.pmid}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-[11px] font-medium text-indigo-700 hover:underline leading-tight block"
+                                            >
+                                                {article.title}
+                                            </a>
+                                            <p className="text-[9px] text-slate-500 mt-1">
+                                                {article.journal} • {article.pubDate}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Drug Interactions */}
+                        {packet.groundingEvidence.drugInteractions.length > 0 && (
+                            <div>
+                                <h5 className="text-[10px] font-bold text-rose-600 uppercase mb-2 flex items-center gap-1">
+                                    ⚠️ Drug Interaction Alerts (OpenFDA)
+                                </h5>
+                                <div className="space-y-2">
+                                    {packet.groundingEvidence.drugInteractions.map((interaction, i) => (
+                                        <div key={i} className={`rounded-lg p-3 border ${interaction.severity === 'major' ? 'bg-rose-50 border-rose-300' :
+                                                interaction.severity === 'moderate' ? 'bg-amber-50 border-amber-300' :
+                                                    'bg-slate-50 border-slate-200'
+                                            }`}>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[11px] font-bold text-slate-800">
+                                                    {interaction.drug1} + {interaction.drug2}
+                                                </span>
+                                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${interaction.severity === 'major' ? 'bg-rose-200 text-rose-700' :
+                                                        interaction.severity === 'moderate' ? 'bg-amber-200 text-amber-700' :
+                                                            'bg-slate-200 text-slate-600'
+                                                    }`}>
+                                                    {interaction.severity}
+                                                </span>
+                                            </div>
+                                            <p className="text-[10px] text-slate-600">{interaction.description}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ICD-10 Codes */}
+                        {packet.groundingEvidence.icdCodes.size > 0 && (
+                            <div>
+                                <h5 className="text-[10px] font-bold text-blue-600 uppercase mb-2 flex items-center gap-1">
+                                    🏷️ ICD-10 Code Suggestions
+                                </h5>
+                                <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                    <div className="space-y-2">
+                                        {Array.from(packet.groundingEvidence.icdCodes.entries()).map(([diagnosis, codes], i) => (
+                                            <div key={i}>
+                                                <span className="text-[10px] font-bold text-slate-700">{diagnosis}:</span>
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {codes.slice(0, 3).map((code, j) => (
+                                                        <span key={j} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-mono rounded">
+                                                            {code.code}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Drug Info (RxNorm + OpenFDA) */}
+                        {packet.groundingEvidence.drugInfo.size > 0 && (
+                            <div>
+                                <h5 className="text-[10px] font-bold text-purple-600 uppercase mb-2 flex items-center gap-1">
+                                    💊 Drug Information
+                                </h5>
+                                <div className="space-y-2">
+                                    {Array.from(packet.groundingEvidence.drugInfo.entries()).map(([drugName, info], i) => (
+                                        <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[11px] font-bold text-slate-800">{info.brandName}</span>
+                                                <span className="text-[9px] text-slate-500">{info.manufacturer}</span>
+                                            </div>
+                                            {info.genericName && (
+                                                <p className="text-[9px] text-slate-500">Generic: {info.genericName}</p>
+                                            )}
+                                            {info.warnings.length > 0 && (
+                                                <div className="mt-2 p-2 bg-amber-50 rounded border border-amber-200">
+                                                    <span className="text-[9px] font-bold text-amber-700">⚠️ Warnings: </span>
+                                                    <span className="text-[9px] text-amber-600">
+                                                        {typeof info.warnings[0] === 'string'
+                                                            ? info.warnings[0].substring(0, 150) + '...'
+                                                            : 'See full label'}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* RxNorm Standardization */}
+                        {packet.groundingEvidence.rxNormConcepts.size > 0 && (
+                            <div>
+                                <h5 className="text-[10px] font-bold text-teal-600 uppercase mb-2 flex items-center gap-1">
+                                    🔗 RxNorm Standardization
+                                </h5>
+                                <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                    <div className="space-y-1">
+                                        {Array.from(packet.groundingEvidence.rxNormConcepts.entries()).map(([drugName, concept], i) => (
+                                            <div key={i} className="flex items-center justify-between text-[10px]">
+                                                <span className="text-slate-600">{drugName}</span>
+                                                <span className="font-mono text-teal-700 bg-teal-50 px-2 py-0.5 rounded">
+                                                    RxCUI: {concept.rxcui}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Footer Actions */}
@@ -330,8 +489,8 @@ const EncounterPacketPanel: React.FC<EncounterPacketPanelProps> = ({ packet, onS
                     onClick={onSign}
                     disabled={packet.signatureStatus === 'Signed'}
                     className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${packet.signatureStatus === 'Signed'
-                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                            : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md'
+                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                        : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md'
                         }`}
                 >
                     {packet.signatureStatus === 'Signed' ? '✓ Signed' : 'Review & Sign'}

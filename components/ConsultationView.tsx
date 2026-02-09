@@ -1,13 +1,12 @@
 
 import React, { useState, useCallback, useRef } from 'react';
-import { Patient, TranscriptEntry, MedicalSuggestions, Speaker, VisualAnalysis, MedicalInsight, EncounterPacket } from '../types';
+import { Patient, TranscriptEntry, MedicalSuggestions, Speaker, VisualAnalysis, MedicalInsight } from '../types';
 import PatientInfoPanel from './PatientInfoPanel';
 import TranscriptionPanel from './TranscriptionPanel';
 import AiSuggestionsPanel from './AiSuggestionsPanel';
-import EncounterPacketPanel from './EncounterPacketPanel';
+import OrderSetsPanel, { OrderItem } from './OrderSetsPanel';
 import { useLiveSession } from '../hooks/useLiveSession';
-import { getMedicalSuggestions, analyzeVisualSymptom, generateEncounterPacket } from '../services/geminiService';
-import { downloadFHIRBundle } from '../services/fhirExport';
+import { getMedicalSuggestions, analyzeVisualSymptom } from '../services/geminiService';
 import { MicIcon } from './icons/MicIcon';
 import { StopIcon } from './icons/StopIcon';
 import { CameraIcon } from './icons/CameraIcon';
@@ -21,13 +20,11 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [suggestions, setSuggestions] = useState<MedicalSuggestions | null>(null);
   const [visualAnalysis, setVisualAnalysis] = useState<VisualAnalysis | null>(null);
-  const [encounterPacket, setEncounterPacket] = useState<EncounterPacket | null>(null);
+  const [orders, setOrders] = useState<OrderItem[]>([]);
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isGeneratingPacket, setIsGeneratingPacket] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
-  const [rightPanelTab, setRightPanelTab] = useState<'suggestions' | 'packet'>('suggestions');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -78,18 +75,31 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
   ];
 
   const handleTranscription = useCallback((text: string, isUser: boolean, isFinal: boolean) => {
-    setTranscript(prev => {
-      // In a real scenario, the model would diarize. Here we infer Clinician/Patient logic
-      // based on keywords or context provided in the system instruction's log format.
-      let speaker = isUser ? Speaker.Clinician : Speaker.Patient;
+    const normalized = text.trim();
+    if (!normalized) return;
 
+    // isUser=true means input from user/patient, isUser=false means model output
+    let entryText = normalized;
+    let speaker = isUser ? Speaker.Patient : Speaker.System;
+    const labeledMatch = normalized.match(/^(clinician|doctor|patient)\s*:\s*(.+)$/i);
+    if (labeledMatch) {
+      const label = labeledMatch[1].toLowerCase();
+      entryText = labeledMatch[2].trim();
+      speaker = label === 'patient' ? Speaker.Patient : Speaker.Clinician;
+    }
+
+    setTranscript(prev => {
       const lastEntry = prev[prev.length - 1];
       if (lastEntry && lastEntry.speaker === speaker && (Date.now() - lastEntry.timestamp < 3000)) {
         const updated = [...prev];
-        updated[updated.length - 1] = { ...lastEntry, text: lastEntry.text + " " + text, timestamp: Date.now() };
+        updated[updated.length - 1] = {
+          ...lastEntry,
+          text: `${lastEntry.text} ${entryText}`,
+          timestamp: Date.now()
+        };
         return updated;
       }
-      return [...prev, { speaker, text, timestamp: Date.now() }];
+      return [...prev, { speaker, text: entryText, timestamp: Date.now() }];
     });
   }, []);
 
@@ -110,7 +120,7 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
     return functionCalls.map(fc => ({ id: fc.id, name: fc.name, response: { status: 'registered' } }));
   };
 
-  const { isActive: isLive, startSession, stopSession } = useLiveSession({
+  const { isActive: isLive, startSession, stopSession, error: liveError } = useLiveSession({
     onTranscription: handleTranscription,
     onToolCall: handleToolCall
   });
@@ -119,15 +129,33 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
     if (isLive) {
       stopSession();
     } else {
-      const systemPrompt = `SYSTEM ROLE: Institutional Clinical Scribe. 
-      STRICT GUIDELINES:
-      1. DO NOT SPEAK. DO NOT INTERJECT. 
-      2. Listen to the interaction between CLINICIAN (User) and PATIENT.
-      3. Diarize the conversation silently.
-      4. Detect patterns. If confidence is HIGH, use 'updateClinicalIntelligence' to promote items to the Decision Engine.
-      5. For lower confidence findings, add them to 'workingObservations'.
-      6. Generate 'recommendedQuestions' as directional widgets for the Clinician to consider.
-      7. Current Patient Context: ${patient.name}, ${patient.age}y.`;
+      const systemPrompt = `SYSTEM ROLE: Institutional Clinical Decision Support Scribe.
+      
+      CRITICAL REQUIREMENTS:
+      1. SILENT MODE: Never speak or generate audio responses. Only listen and analyze.
+      2. PROACTIVE TOOL USE: You MUST call 'updateClinicalIntelligence' FREQUENTLY as you hear clinical information.
+      3. DO NOT WAIT: Even partial observations should be reported via the tool. Call it early and often.
+      
+      WHAT TO DETECT AND REPORT:
+      - Any symptoms mentioned → add to workingObservations
+      - Any medications discussed → add to workingObservations  
+      - Possible diagnoses (even if uncertain) → add to possibleDiagnoses with appropriate confidence
+      - Questions the clinician should ask → add to recommendedQuestions
+      - Red flags or urgent findings → add with HIGH confidence
+      
+      PATIENT CONTEXT:
+      - Name: ${patient.name}
+      - Age: ${patient.age} years old
+      - Gender: ${patient.gender}
+      - Medical History: ${patient.medicalHistory.length > 0 ? patient.medicalHistory.join(', ') : 'None documented'}
+      - Current Medications: ${patient.currentMedications.length > 0 ? patient.currentMedications.join(', ') : 'None'}
+      - Allergies: ${patient.allergies.length > 0 ? patient.allergies.join(', ') : 'NKDA'}
+      
+      SPEAKER LABELING:
+      - Default to PATIENT when ambiguous
+      - Only mark as CLINICIAN when clearly the doctor/provider speaking
+      
+      START NOW: As soon as you hear any clinical content, call updateClinicalIntelligence immediately.`;
 
       startSession(systemPrompt, toolDeclarations);
     }
@@ -164,31 +192,60 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
     } catch (e) { console.error(e); } finally { setIsAiLoading(false); }
   };
 
-  const handleGeneratePacket = async () => {
-    if (transcript.length === 0) return;
-    setIsGeneratingPacket(true);
-    try {
-      const packet = await generateEncounterPacket(patient, transcript, visualAnalysis || undefined);
-      setEncounterPacket(packet);
-      setRightPanelTab('packet');
-    } catch (e) {
-      console.error('Failed to generate encounter packet:', e);
-    } finally {
-      setIsGeneratingPacket(false);
-    }
-  };
+  // Demo mode: Simulate a clinical conversation for testing
+  const simulateDemoCase = async () => {
+    const demoTranscript: TranscriptEntry[] = [
+      { speaker: Speaker.Patient, text: "Doctor, I've been having this tightness in my chest for the past three days. It gets worse when I walk up stairs.", timestamp: Date.now() - 60000 },
+      { speaker: Speaker.Clinician, text: "Can you describe the pain? Is it sharp or more of a pressure?", timestamp: Date.now() - 55000 },
+      { speaker: Speaker.Patient, text: "It's more like a pressure, and I'm also feeling really tired and short of breath.", timestamp: Date.now() - 50000 },
+      { speaker: Speaker.Clinician, text: "Do you have any other medical conditions?", timestamp: Date.now() - 45000 },
+      { speaker: Speaker.Patient, text: "I'm diabetic - I take Metformin 500mg twice a day. My blood sugar has been running high lately, around 250.", timestamp: Date.now() - 40000 },
+      { speaker: Speaker.Clinician, text: "Any family history of heart disease?", timestamp: Date.now() - 35000 },
+      { speaker: Speaker.Patient, text: "Yes, my dad had a heart attack when he was 55. I'm 52 years old.", timestamp: Date.now() - 30000 },
+      { speaker: Speaker.Clinician, text: "I see. Let's get a 12-lead EKG, troponin levels, CBC, and a basic metabolic panel stat. We need to rule out acute coronary syndrome.", timestamp: Date.now() - 25000 },
+    ];
 
-  const handleSignPacket = () => {
-    if (!encounterPacket) return;
-    setEncounterPacket({
-      ...encounterPacket,
-      signatureStatus: 'Signed'
+    setTranscript(demoTranscript);
+
+    // Simulate AI-generated insights
+    setSuggestions({
+      possibleDiagnoses: [
+        { id: 'dx1', title: 'Acute Coronary Syndrome', details: 'Exertional chest tightness with cardiac risk factors (diabetes, family history, age >50)', confidence: 'High' },
+        { id: 'dx2', title: 'Unstable Angina', details: 'Progressive anginal symptoms without rest relief', confidence: 'Medium' },
+        { id: 'dx3', title: 'Diabetic Cardiomyopathy', details: 'Poorly controlled diabetes with cardiac symptoms', confidence: 'Medium' },
+      ],
+      recommendedQuestions: [
+        { id: 'q1', title: 'Does the pain radiate to your arm, jaw, or back?', details: 'Assess for typical anginal radiation pattern', confidence: 'High' },
+        { id: 'q2', title: 'Have you experienced any nausea, sweating, or dizziness?', details: 'Screen for associated autonomic symptoms', confidence: 'High' },
+        { id: 'q3', title: 'When was your last HbA1c test?', details: 'Assess glycemic control timeline', confidence: 'Medium' },
+      ],
+      suggestedLabsAndTests: [
+        { id: 'lab1', title: '12-Lead EKG', details: 'Evaluate for ischemic changes, ST elevation/depression', confidence: 'High' },
+        { id: 'lab2', title: 'Troponin I/T', details: 'Serial cardiac biomarkers to rule out MI', confidence: 'High' },
+        { id: 'lab3', title: 'Basic Metabolic Panel', details: 'Assess electrolytes, glucose, renal function', confidence: 'High' },
+      ],
+      potentialTreatments: [
+        { id: 'tx1', title: 'Aspirin 325mg', details: 'Antiplatelet therapy if no contraindications', confidence: 'High' },
+        { id: 'tx2', title: 'Nitroglycerin sublingual', details: 'For symptom relief if BP adequate', confidence: 'Medium' },
+      ],
+      workingObservations: [
+        { id: 'obs1', title: 'Poorly Controlled Type 2 Diabetes', details: 'Blood glucose 250 mg/dL, on Metformin monotherapy', confidence: 'High' },
+        { id: 'obs2', title: 'Significant Cardiac Risk Factors', details: 'Age 52, T2DM, family history premature CAD (father at 55)', confidence: 'High' },
+        { id: 'obs3', title: 'Exertional Symptoms', details: 'Chest pressure and dyspnea worsen with stair climbing', confidence: 'High' },
+      ]
     });
-  };
 
-  const handleExportFHIR = () => {
-    if (!encounterPacket) return;
-    downloadFHIRBundle(encounterPacket);
+    // Populate Smart Order Sets
+    setOrders([
+      { id: 'ord1', type: 'Lab', name: '12-Lead EKG', details: 'Evaluate for ST changes and arrhythmias', priority: 'STAT', rationale: 'Rule out acute MI given symptom profile', status: 'suggested' },
+      { id: 'ord2', type: 'Lab', name: 'Troponin I (Serial)', details: 'Baseline + 3hr + 6hr levels', priority: 'STAT', rationale: 'High-sensitivity troponin for ACS workup', status: 'suggested' },
+      { id: 'ord3', type: 'Lab', name: 'Basic Metabolic Panel', details: 'Electrolytes, glucose, renal function', priority: 'Urgent', rationale: 'Assess for metabolic derangements', status: 'suggested' },
+      { id: 'ord4', type: 'Medication', name: 'Aspirin 325mg PO', details: 'Chewable, one-time dose', priority: 'STAT', rationale: 'Antiplatelet therapy - no ASA allergy documented', status: 'suggested' },
+      { id: 'ord5', type: 'Medication', name: 'Nitroglycerin 0.4mg SL', details: 'PRN chest pain, may repeat x3', priority: 'Urgent', rationale: 'Symptomatic relief if SBP > 90', status: 'suggested' },
+      { id: 'ord6', type: 'Imaging', name: 'Chest X-Ray PA/Lateral', details: 'Portable if patient unstable', priority: 'Routine', rationale: 'Evaluate cardiac silhouette and pulmonary status', status: 'suggested' },
+    ]);
+
+    setLastUpdate(Date.now());
   };
 
   return (
@@ -225,6 +282,14 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
               </button>
 
               <button
+                onClick={simulateDemoCase}
+                className="px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition-all"
+                title="Load a demo clinical case for testing"
+              >
+                🧪 Demo
+              </button>
+
+              <button
                 onClick={isCameraActive ? stopCamera : startCamera}
                 className={`p-2 rounded border transition-all ${isCameraActive ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-400 border-slate-200'}`}
               >
@@ -232,6 +297,12 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
               </button>
             </div>
           </div>
+
+          {liveError && (
+            <div className="px-4 py-2 text-[10px] font-bold text-rose-700 bg-rose-50 border-b border-rose-100">
+              Live session error: {liveError}
+            </div>
+          )}
 
           <div className="flex-grow flex flex-col min-h-0 relative">
             {isCameraActive && (
@@ -280,87 +351,27 @@ const ConsultationView: React.FC<ConsultationViewProps> = ({ patient }) => {
         </div>
       </div>
 
-      <div className="col-span-3 min-h-0 flex flex-col gap-4">
-        {/* Tab Header */}
-        <div className="flex bg-white rounded-t-lg border border-slate-200 border-b-0 overflow-hidden">
-          <button
-            onClick={() => setRightPanelTab('suggestions')}
-            className={`flex-1 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${rightPanelTab === 'suggestions'
-                ? 'text-indigo-600 bg-white border-b-2 border-indigo-600'
-                : 'text-slate-500 bg-slate-50 hover:text-slate-700'
-              }`}
-          >
-            💡 Insights
-          </button>
-          <button
-            onClick={() => setRightPanelTab('packet')}
-            className={`flex-1 px-3 py-2 text-[10px] font-black uppercase tracking-wider transition-all ${rightPanelTab === 'packet'
-                ? 'text-indigo-600 bg-white border-b-2 border-indigo-600'
-                : 'text-slate-500 bg-slate-50 hover:text-slate-700'
-              }`}
-          >
-            📋 Packet {encounterPacket && '✓'}
-          </button>
+      {/* Right Panel: Clinical Intelligence */}
+      <div className="col-span-3 min-h-0 flex flex-col gap-3 overflow-hidden">
+        {/* AI Suggestions */}
+        <div className="flex-shrink-0 max-h-[50%] overflow-y-auto custom-scrollbar">
+          <AiSuggestionsPanel
+            suggestions={suggestions}
+            isLoading={isAiLoading}
+            visualAnalysis={visualAnalysis}
+          />
         </div>
 
-        {/* Panel Content */}
-        <div className="flex-grow min-h-0 relative -mt-4">
-          {rightPanelTab === 'suggestions' ? (
-            <AiSuggestionsPanel
-              suggestions={suggestions}
-              isLoading={isAiLoading}
-              visualAnalysis={visualAnalysis}
-            />
-          ) : encounterPacket ? (
-            <EncounterPacketPanel
-              packet={encounterPacket}
-              onSign={handleSignPacket}
-              onExportFHIR={handleExportFHIR}
-            />
-          ) : (
-            <div className="h-full bg-white rounded-xl border border-slate-200 flex items-center justify-center">
-              <div className="text-center p-8">
-                <div className="text-4xl mb-4">📋</div>
-                <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-2">
-                  No Encounter Packet Generated
-                </p>
-                <p className="text-[10px] text-slate-500 mb-4">
-                  Record a consultation to generate a signable encounter packet.
-                </p>
-                <button
-                  onClick={handleGeneratePacket}
-                  disabled={transcript.length === 0 || isGeneratingPacket}
-                  className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${transcript.length === 0 || isGeneratingPacket
-                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md'
-                    }`}
-                >
-                  {isGeneratingPacket ? 'Generating...' : 'Generate Packet'}
-                </button>
-              </div>
-            </div>
-          )}
+        {/* Smart Order Sets */}
+        <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-y-auto custom-scrollbar">
+          <OrderSetsPanel orders={orders} />
         </div>
-
-        {/* Generate Packet Button (always visible when in suggestions tab) */}
-        {rightPanelTab === 'suggestions' && transcript.length > 0 && (
-          <button
-            onClick={handleGeneratePacket}
-            disabled={isGeneratingPacket}
-            className={`w-full py-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isGeneratingPacket
-                ? 'bg-slate-300 text-slate-500 cursor-wait'
-                : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700 shadow-lg'
-              }`}
-          >
-            {isGeneratingPacket ? '⏳ Generating Encounter Packet...' : '📋 Generate Signable Packet'}
-          </button>
-        )}
 
         <div className="p-3 bg-slate-900 text-slate-400 rounded text-[9px] font-bold uppercase tracking-widest border border-slate-800">
           Silent Copilot // Institutional Core
           <div className="mt-1 flex items-center gap-2 opacity-50">
-            <span className="w-1 h-1 bg-emerald-500 rounded-full"></span>
-            Diarization: Active
+            <span className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse"></span>
+            Clinical Intelligence: Active
           </div>
         </div>
       </div>
