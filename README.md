@@ -4,7 +4,7 @@
 
 # Clinical-OS: AI-Powered Ambient Clinical Intelligence
 
-> **Generate a Signable Encounter Packet in 60 Seconds** — SOAP notes, problem list, orders draft, patient instructions, and follow-ups with full provenance tracking.
+> **Real-time clinical decision support** — Ambient scribe with live diagnostic suggestions, smart order sets, and evidence-based recommendations.
 
 ## 🎯 The Problem
 
@@ -15,102 +15,54 @@ Clinicians spend **2+ hours daily** on documentation. This administrative burden
 
 ## 💡 The Solution
 
-Clinical-OS is an ambient clinical scribe that listens to patient encounters and generates a **complete, signable encounter packet** — not just raw transcription, but structured clinical documentation ready for review.
+Clinical-OS is an ambient clinical scribe that listens to patient encounters and provides **real-time clinical intelligence** — diagnostic suggestions, smart order recommendations, and evidence-based insights.
 
 ---
 
 ## ✨ Key Features
 
-### 1. Signable Encounter Packet
-- **SOAP Notes** with Subjective, Objective, Assessment, and Plan
-- **Problem List** with ICD-10 codes
-- **Draft Orders** (labs, imaging, medications, referrals)
-- **Patient Instructions** (multilingual support)
-- **Follow-up Recommendations**
+### 1. Ambient Scribe
+- **Multi-speaker diarization** — Distinguishes patient, clinician, and system
+- **Real-time transcription** — Powered by Gemini Live API
+- **Clinical context extraction** — Automatically identifies symptoms, medications, diagnoses
 
-### 2. Evidence Provenance (The Tasteful Flex)
-Every suggestion includes:
-- 📍 **Transcript Anchor** — exact quote from the conversation
-- 🧠 **Reasoning** — clinical rationale for the inference
-- 📊 **Confidence Score** — Low/Medium/High
-- 🔄 **Alternative Interpretations** — what could change the conclusion
+### 2. AI Decision Support
+Real-time suggestions as the conversation unfolds:
+- 🩺 **Possible Diagnoses** with confidence levels
+- ❓ **Recommended Questions** to ask the patient
+- 🧪 **Suggested Labs & Tests** with clinical rationale
+- 💊 **Potential Treatments** based on context
 
-### 3. Safety Layer (Product-Shaped, Not Legal-Shaped)
-- 🔴 **Red Flag Detector** — chest pain, neuro deficits, suicidal ideation
-- 🔒 **PII Redaction Mode** — mask SSN, phone, dates in display
-- ✋ **Human Confirmation Workflow** — nothing is promoted without clinician review
-- 💊 **Contraindication Alerts** — checks against allergies, meds, conditions
+### 3. Smart Order Sets
+One-click ordering with clinical intelligence:
+- **Priority badges** — STAT, Urgent, Routine
+- **Clinical rationale** — AI explains why each order is suggested
+- **Order types** — Labs, Medications, Imaging, Referrals, Procedures
 
-### 4. Multilingual Support
-- **Dual Transcript View** — original language + clinical English
-- **Code-Switch Detection** — identifies language changes mid-conversation
-- **Localized Instructions** — patient instructions in their preferred language
+### 4. Safety Layer
+- 🔴 **Red Flag Detector** — Chest pain, neuro deficits, suicidal ideation
+- 💊 **Allergy Alerts** — Checks against documented allergies
+- ✋ **Human-in-the-loop** — All suggestions require clinician review
 
-### 5. FHIR-lite Interoperability
-Export encounters as standard **FHIR R4 Bundles**:
-- `Condition` (diagnoses, problem list)
-- `Observation` (visual findings)
-- `MedicationRequest` (medication orders)
-- `ServiceRequest` (labs, imaging)
-- `DocumentReference` (narrative note)
-
-### 6. Patient Memory (Longitudinal Context)
-- **Inspectable Store** — localStorage-based, fully transparent
-- **Pin/Forget UX** — control what persists across encounters
-- **Sourced Facts** — every memory item shows its origin
+### 5. Visual Analysis
+- **Camera integration** — Capture and analyze visible symptoms
+- **AI-powered assessment** — Skin conditions, wounds, physical findings
 
 ---
 
-## 📊 Evaluation Metrics
+## 🚀 Getting Started
 
-Built-in replay harness for deterministic testing:
+### Prerequisites
+- Node.js 18+
+- Gemini API key
 
-| Metric | Description | Target |
-|--------|-------------|--------|
-| **Coverage** | Did we generate note/orders/instructions? | 100% |
-| **Latency** | Time to first insight | <2s |
-| **Provenance Completeness** | % of claims with evidence links | >85% |
-| **Unsupported Claim Rate** | Claims without transcript backing | <5% |
-| **Contradiction Rate** | Conflicting information | 0% |
-
-Sample sessions included for testing:
-- `demo-chest-pain` — Cardiac evaluation with red flags
-- `demo-multilingual-diabetes` — Spanish-English code-switching
-
----
-
-## 🚀 Roadmap: What's Real vs. Aspirational
-
-| Phase | Feature | Status |
-|-------|---------|--------|
-| **v0 (Current)** | Ambient transcription + basic suggestions | ✅ Shipped |
-| **v1 (This Branch)** | Encounter Packet + Provenance + Safety | ✅ Implemented |
-| **v1.1** | FHIR Export + Multilingual | ✅ Implemented |
-| **v1.2** | Patient Memory + Replay Harness | ✅ Implemented |
-| **v2 (Future)** | EHR Integration (Epic/Cerner) | 🔮 Aspirational |
-| **v2.1** | Real-time contraindication checks via APIs | 🔮 Aspirational |
-| **v2.2** | Automated ICD-10/CPT coding | 🔮 Aspirational |
-
----
-
-## 🎬 2-Minute Demo Script
-
-1. **0:00** — Select patient from queue (show diverse patient panel)
-2. **0:15** — Start ambient scribe, simulate conversation
-3. **0:45** — Show real-time insights appearing (diagnoses, questions)
-4. **1:00** — Click "Generate Encounter Packet"
-5. **1:15** — Walk through SOAP note with provenance tooltips
-6. **1:30** — Show Orders tab, demonstrate priority levels
-7. **1:45** — Open Safety panel, show red-flag detection
-8. **2:00** — Export FHIR Bundle, show JSON structure
-
----
-
-## 🛠 Run Locally
-
-**Prerequisites:** Node.js 18+
+### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/naish-nem/Clinical-OS.git
+cd Clinical-OS
+
 # Install dependencies
 npm install
 
@@ -121,6 +73,9 @@ echo "API_KEY=your_key_here" > .env.local
 npm run dev
 ```
 
+### Demo Mode
+Click the **🧪 Demo** button to load a sample clinical scenario without requiring microphone access.
+
 ---
 
 ## 📁 Project Structure
@@ -130,20 +85,40 @@ health-assist-ai-v1.1/
 ├── App.tsx                     # Main application
 ├── components/
 │   ├── ConsultationView.tsx    # Main encounter view
-│   ├── EncounterPacketPanel.tsx # Signable packet UI
-│   ├── SafetyPanel.tsx         # Safety controls
-│   ├── PatientMemoryPanel.tsx  # Longitudinal memory
-│   ├── TranscriptionPanel.tsx  # Multilingual transcript
-│   └── AiSuggestionsPanel.tsx  # Real-time insights
+│   ├── AiSuggestionsPanel.tsx  # Real-time insights
+│   ├── OrderSetsPanel.tsx      # Smart order recommendations
+│   ├── TranscriptionPanel.tsx  # Clinical transcript
+│   ├── PatientInfoPanel.tsx    # Patient context
+│   └── SafetyPanel.tsx         # Safety controls
 ├── services/
-│   ├── geminiService.ts        # AI generation (SOAP, suggestions)
-│   └── fhirExport.ts           # FHIR R4 Bundle conversion
+│   ├── geminiService.ts        # AI generation
+│   └── groundingService.ts     # Medical API integrations
 ├── hooks/
 │   ├── useLiveSession.ts       # WebSocket transcription
-│   ├── usePatientMemory.ts     # localStorage persistence
-│   └── useReplaySession.ts     # Evaluation harness
-└── types.ts                    # Full type definitions
+│   └── usePatientMemory.ts     # localStorage persistence
+└── types.ts                    # Type definitions
 ```
+
+---
+
+## 🛠 Technology Stack
+
+- **Frontend**: React + TypeScript + Vite
+- **AI**: Google Gemini API (Live + Text)
+- **Styling**: Tailwind-inspired utility CSS
+- **Medical APIs**: PubMed, OpenFDA, RxNorm, ICD-10
+
+---
+
+## 📊 Roadmap
+
+| Version | Feature | Status |
+|---------|---------|--------|
+| v0 | Ambient transcription + basic suggestions | ✅ Complete |
+| v1 | Smart Order Sets + Decision Support | ✅ Complete |
+| v1.1 | Demo mode + Visual polish | ✅ Complete |
+| v2 | EHR Integration (Epic/Cerner) | 🔮 Planned |
+| v2.1 | Real-time drug interaction checks | 🔮 Planned |
 
 ---
 
